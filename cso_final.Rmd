@@ -1,0 +1,110 @@
+---
+title: "Untitled"
+author: "Erlangga"
+date: "2025-11-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(leaflet)
+library(htmltools)
+library(htmlwidgets)
+
+# Load data
+data <- read_csv("cso_final.csv")
+
+# Split rows by multiple topics
+data_long <- data %>%
+  separate_rows(Topic, sep = ";") %>%
+  mutate(Topic = trimws(Topic))
+
+# Define your palette (hex colors as provided)
+custom_colors <- c(
+  "#ccdbdc", "#c0fdfb", "#80ced7", "#007ea7", "#809bce","#33608C",
+  "#f3ffbd", "#edeec9", "#a5be00"
+)
+topics_unique <- unique(data_long$Topic)
+palette_colors <- rep(custom_colors, length.out = length(topics_unique))
+category_colors <- colorFactor(palette_colors, topics_unique)
+
+# Group and create topics HTML with background color
+tooltips_df <- data_long %>%
+  group_by(Organisation, Longitude, Latitude, Office_location, Example_project_location, Website, Program_name, More_info, ImageURL) %>%
+  summarize(
+    topics_html = paste0(
+      "<span style='background-color:", category_colors(Topic),
+      "; color:black; padding:2px 6px; border-radius:4px; display:inline-block;'>",
+      Topic,
+      "</span>",
+      collapse = "<br>"
+    ),
+    .groups = "drop"
+  ) %>%
+  rowwise() %>%
+  mutate(
+    more_info_links = if (!is.na(More_info) && More_info != "") {
+  links <- strsplit(More_info, ";")[[1]] %>% trimws()
+  paste0("<a href='", links, "' target='_blank'>More info</a>", collapse = "; ")
+} else {
+  ""
+}
+,
+    popup_content = paste0(
+      "<strong>", Organisation, "</strong><br>",
+      "<img src='", ImageURL, "' style='width: 100px; margin-bottom:5px;'><br>",  # Logo/image
+      "<a href='", Website, "' target='_blank'>Website</a><br>",
+      Office_location, "<br>",
+      "<em>Example project location:</em> ", Example_project_location, "<br>",
+      "Program: ", Program_name, "<br>",
+      "Topics:<br>", topics_html, "<br>",
+      more_info_links
+    )
+  ) %>%
+  ungroup()
+
+# Create leaflet map with smaller legend font size
+cso_map <- leaflet(tooltips_df) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~Longitude,
+    lat = ~Latitude,
+    radius = 7,
+    fillOpacity = 0.7,
+    color = "mediumblue",
+    stroke = FALSE,
+    label = ~lapply(topics_html, HTML),
+    popup = ~popup_content
+  ) %>%
+  addLegend(
+    "bottomleft",
+    pal = category_colors,
+    values = topics_unique,
+    title = "Program Topic"
+  ) %>%
+  onRender("
+  function(el, x) {
+    var legend = document.querySelector('.legend');
+    if (legend) {
+      legend.style.fontSize = '8px';         // smaller font size
+      legend.style.padding = '3px 4px';      // reduce padding inside legend box
+      // shrink margin around legend items
+      var items = legend.querySelectorAll('div');
+      items.forEach(function(item) {
+        item.style.margin = '3px 0';
+      });
+    }
+  }
+")
+
+saveWidget(cso_map, file = "index.html", selfcontained = TRUE, libdir = "CSO_files")
+
+```
+
